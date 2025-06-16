@@ -133,10 +133,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--controller",
         type=str,
-        default=None,
+        default="WHOLE_BODY_IK",
         help="Choice of controller. Can be generic (eg. 'BASIC' or 'WHOLE_BODY_MINK_IK') or json file (see robosuite/controllers/config for examples) or None to get the robot's default controller if it exists",
     )
-    parser.add_argument("--device", type=str, default="keyboard")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="t265",
+        choices=["keyboard", "mjgui", "t265", "ios", "magiclaw"],
+    )
     parser.add_argument(
         "--pos-sensitivity",
         type=float,
@@ -160,6 +165,11 @@ if __name__ == "__main__":
         type=bool,
         default=False,
         help="(DualSense Only)Reverse the effect of the x and y axes of the joystick.It is used to handle the case that the left/right and front/back sides of the view are opposite to the LX and LY of the joystick(Push LX up but the robot move left in your view)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        help="(MagiClaw Only)Host address of the IOS device or MagiClaw.",
     )
     args = parser.parse_args()
 
@@ -187,7 +197,7 @@ if __name__ == "__main__":
         **config,
         has_renderer=True,
         has_offscreen_renderer=False,
-        render_camera="agentview",
+        render_camera="frontview",
         ignore_done=True,
         use_camera_obs=False,
         reward_shaping=True,
@@ -211,29 +221,45 @@ if __name__ == "__main__":
             rot_sensitivity=args.rot_sensitivity,
         )
         env.viewer.add_keypress_callback(device.on_press)
-    elif args.device == "spacemouse":
-        from robosuite.devices import SpaceMouse
-
-        device = SpaceMouse(
-            env=env,
-            pos_sensitivity=args.pos_sensitivity,
-            rot_sensitivity=args.rot_sensitivity,
-        )
-    elif args.device == "dualsense":
-        from robosuite.devices import DualSense
-
-        device = DualSense(
-            env=env,
-            pos_sensitivity=args.pos_sensitivity,
-            rot_sensitivity=args.rot_sensitivity,
-            reverse_xy=args.reverse_xy,
-        )
     elif args.device == "mjgui":
         from robosuite.devices.mjgui import MJGUI
 
         device = MJGUI(env=env)
+    elif args.device == "ios":
+        from robosuite.devices import IOSDevice
+
+        if args.host is None:
+            raise ValueError("Host address must be specified for IOS device.")
+        device = IOSDevice(
+            env=env,
+            host=args.host,
+            pos_sensitivity=args.pos_sensitivity,
+            rot_sensitivity=args.rot_sensitivity,
+        )
+    # elif args.device == "magiclaw":
+    #     from robosuite.devices import MagiClaw
+
+    #     if args.host is None:
+    #         raise ValueError("Host address must be specified for MagiClaw device.")
+    #     device = MagiClaw(
+    #         env=env,
+    #         host=args.host,
+    #         pos_sensitivity=args.pos_sensitivity,
+    #         rot_sensitivity=args.rot_sensitivity,
+    #     )
+    elif args.device == "t265":
+        from robosuite.devices.realsense_t265 import RealSenseT265
+
+        device = RealSenseT265(
+            env=env,
+            pos_sensitivity=args.pos_sensitivity,
+            rot_sensitivity=args.rot_sensitivity,
+        )
+    
     else:
-        raise Exception("Invalid device choice: choose either 'keyboard', 'dualsene' or 'spacemouse'.")
+        raise Exception(
+            "Invalid device choice: choose either 'keyboard', 'mjgui', 't265' or 'magiclaw'."
+        )
 
     while True:
         # Reset the environment
@@ -288,6 +314,7 @@ if __name__ == "__main__":
                     action_dict[arm] = input_ac_dict[f"{arm}_abs"]
                 else:
                     raise ValueError
+                print(f"{arm} {controller_input_type} action: {action_dict[arm]}")
 
             # Maintain gripper state for each robot but only update the active robot with action
             env_action = [robot.create_action_vector(all_prev_gripper_actions[i]) for i, robot in enumerate(env.robots)]

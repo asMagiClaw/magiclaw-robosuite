@@ -15,3 +15,9 @@ robosuite-models==1.0.0
 
 # for USD export and rendering
 usd-core
+
+# for rendering
+imageio
+imageio[ffmpeg]
+imageio[pyav]
+matplotlib

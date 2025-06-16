@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package Phone;
+
+message Phone
+{
+    float timestamp = 1;
+    bytes color_img = 2;
+    bytes depth_img = 3;
+    int32 depth_width = 4;
+    int32 depth_height = 5;
+    repeated float local_pose = 6;
+    repeated float global_pose = 7;
+}

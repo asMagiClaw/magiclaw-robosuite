@@ -1,6 +1,6 @@
 from .device import Device
 from .keyboard import Keyboard
-
+from .ios_device import IOSDevice
 try:
     from .spacemouse import SpaceMouse
     from .dualsense import DualSense

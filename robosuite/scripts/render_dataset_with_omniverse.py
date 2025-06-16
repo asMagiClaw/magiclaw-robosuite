@@ -1,6 +1,6 @@
 import argparse
 
-from omni.isaac.lab.app import AppLauncher
+from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Settings for SimulationApp")
 
@@ -114,8 +114,7 @@ import h5py
 import lxml.etree as ET
 import numpy as np
 import omni
-import omni.isaac.core.utils.stage as stage_utils
-import omni.kit.app
+import isaacsim.core.utils.stage as stage_utils
 import omni.replicator.core as rep
 import omni.timeline
 from pxr import Semantics
