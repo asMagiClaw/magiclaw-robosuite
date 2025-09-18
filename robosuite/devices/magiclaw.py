@@ -1,5 +1,5 @@
 """
-Driver for iOS Devices with MagiClaw app.
+Driver for MagiClaw.
 """
 
 import threading
@@ -9,12 +9,12 @@ import numpy as np
 from typing import Tuple, Dict, Optional, List
 from robosuite.controllers.composite.composite_controller import WholeBody, WholeBodyIK
 from robosuite.devices import Device
-from robosuite.devices.protobuf import phone_msg_pb2
+from robosuite.devices.protobuf import magiclaw_msg_pb2
 from robosuite.utils import transform_utils
-from pynput.keyboard import Key, Listener
+from pynput.keyboard import Listener
 
 
-class PhoneSubscriber:
+class MagiClawSubscriber:
     def __init__(self, host: str, port: int, hwm: int = 1, conflate: bool = True, timeout: int = 100) -> None:
         """Subscriber initialization.
 
@@ -25,7 +25,7 @@ class PhoneSubscriber:
             conflate (bool): Whether to conflate messages. Default is True.
         """
 
-        print("{:-^80}".format(" Phone Subscriber Initialization "))
+        print("{:-^80}".format(" MagiClaw Subscriber Initialization "))
         print(f"Address: tcp://{host}:{port}")
 
         # Create a ZMQ context
@@ -38,55 +38,58 @@ class PhoneSubscriber:
         self.subscriber.setsockopt(zmq.CONFLATE, conflate)
         # Connect the address
         self.subscriber.connect(f"tcp://{host}:{port}")
-        # Subscribe the topic
+        # Subscribe all messages
         self.subscriber.setsockopt_string(zmq.SUBSCRIBE, "")
         # Set poller
         self.poller = zmq.Poller()
         self.poller.register(self.subscriber, zmq.POLLIN)
         self.timeout = timeout
 
-        print("Package Phone")
-        print("Message Phone")
+        print("Package Claw")
+        print("Message Motor")
+        print("{\n\tfloat angle = 1;\n\tfloat speed = 2;\n\tfloat iq = 3;\n\tint32 temperature = 4;\n}")
+        print("Message Claw")
+        print("{\n\tfloat angle = 1;\n\tMotor motor = 2;\n}")
+        print("Message Finger")
         print(
             "{\n\tbytes img = 1;\n\trepeated float pose = 2;\n\trepeated float force = 3;\n\trepeated float node = 4;\n}"
         )
+        print("Message Phone")
+        print(
+            "{\n\tbytes color_img = 1;\n\trepeated int32 depth_img = 2\n\trepeated int32 depth_width = 3\n\trepeated int32 depth_height = 4\n}"
+        )
+        print("Message MagiClaw")
+        print(
+            "{\n\tfloat timestamp = 1;\n\tClaw claw = 2;\n\tFinger finger_0 = 3;\n\tFinger finger_1 = 4;\n\tPhone phone = 5;\n}"
+        )
 
-        print("Phone Subscriber Initialization Done.")
+        print("Claw Subscriber Initialization Done.")
         print("{:-^80}".format(""))
 
-    def subscribeMessage(self) -> Tuple[bytes, list, int, int, list, list]:
+    def subscribeMessage(self):
         """Subscribe the message.
 
-        Args:
-            timeout: Maximum time to wait for a message in milliseconds. Default is 100ms.
-
         Returns:
-            color_img: The image captured by the camera.
-            depth_img: The depth image captured by the camera.
-            depth_width: The width of the depth image.
-            depth_height: The height of the depth image.
-            local_pose: The local pose of the phone.
-            global_pose: The global pose of the phone.
-
-        Raises:
-            zmq.ZMQError: If no message is received within the timeout period.
+            The message.
         """
 
-        if self.poller.poll(self.timeout):
-            # Receive the message
-            msg = self.subscriber.recv()
-            # Parse the message
-            phone = phone_msg_pb2.Phone()
-            phone.ParseFromString(msg)
-        else:
-            raise Exception("No message received within the timeout period.")
+        # Receive the message
+        msg = self.subscriber.recv()
+        # Parse the message
+        magiclaw = magiclaw_msg_pb2.MagiClaw()
+        magiclaw.ParseFromString(msg)
+
+        # Unpack the message
+        claw_angle = magiclaw.claw.angle
+        motor_angle = magiclaw.claw.motor.angle
+        motor_speed = magiclaw.claw.motor.speed
+        magiclaw_pose = np.array(magiclaw.pose)
+
         return (
-            phone.color_img,
-            phone.depth_img,
-            phone.depth_width,
-            phone.depth_height,
-            phone.local_pose,
-            phone.global_pose,
+            claw_angle,
+            motor_angle,
+            motor_speed,
+            magiclaw_pose,
         )
 
     def close(self):
@@ -96,42 +99,48 @@ class PhoneSubscriber:
         if hasattr(self, "context") and self.context:
             self.context.term()
 
-
-class IOSDevice(Device):
+class MagiClaw(Device):
     """
-    Device for iOS devices with MagiClaw app.
+    Device for MagiClaw.
     """
-
+    
     def __init__(
         self,
         env,
         host,
-        port=8000,
+        port=6300,
         pos_sensitivity=1.0,
         rot_sensitivity=1.0,
         active_end_effector: Optional[str] = "right",
     ) -> None:
         """
-        Initialize the iOS device.
+        Initialize the MagiClaw device.
 
         Args:
-            host (str): The host address of the subscriber.
-            port (int): The port number of the subscriber.
+            env: The environment in which the device operates.
+            host (str): The host address of the MagiClaw server.
+            port (int): The port number of the MagiClaw server.
+            pos_sensitivity (float): Sensitivity for position control.
+            rot_sensitivity (float): Sensitivity for rotation control.
+            active_end_effector (Optional[str]): The active end effector to control, default is "right".
         """
+        
         super().__init__(env)
-
+        
         self.pos_sensitivity = pos_sensitivity
         self.rot_sensitivity = rot_sensitivity
         self.active_end_effector = active_end_effector
 
         self._pose = np.zeros(7, dtype=np.float32)
+        self._initial_pose = np.zeros(7, dtype=np.float32)
+        self._claw_angle = 0.0
         self._reset_state = 0
         self._enabled = False
 
         self.host = host
         self.port = port
-        self.subscriber = PhoneSubscriber(host, port)
-
+        self.subscriber = MagiClawSubscriber(host, port)
+        
         self._display_controls()
         self._reset_internal_state()
 
@@ -144,16 +153,16 @@ class IOSDevice(Device):
                 "pos": copy.deepcopy(pos),
                 "mat": copy.deepcopy(mat),
             }
-
-        # launch a thread to listen to iOS device messages
+        
+        # launch a thread to listen to MagiClaw messages
         self.thread = threading.Thread(target=self.run)
         self.thread.daemon = True
         self.thread.start()
-
+        
         # also add a listener for keyboard events
         self.listener = Listener(on_press=self.on_press, on_release=self.on_release)
         self.listener.start()
-
+        
     @staticmethod
     def _display_controls():
         """
@@ -166,16 +175,16 @@ class IOSDevice(Device):
 
         print("")
         print_command("Control", "Command")
-        print_command("Move iOS device laterally", "move arm horizontally in x-y plane")
-        print_command("Move iOS device vertically", "move arm vertically")
-        print_command("Twist iOS device about an axis", "rotate arm about a corresponding axis")
+        print_command("Move MagiClaw laterally", "move arm horizontally in x-y plane")
+        print_command("Move MagiClaw vertically", "move arm vertically")
+        print_command("Twist MagiClaw about an axis", "rotate arm about a corresponding axis")
+        print_command("Move MagiClaw trigger", "open/close gripper")
         print_command("Ctrl+C", "quit")
         print_command("", "reset simulation")
-        print_command("spacebar", "toggle gripper (open/close)")
         print_command("b", "toggle arm/base mode (if applicable)")
         print_command("s", "switch active arm (if multi-armed robot)")
         print_command("=", "switch active robot (if multi-robot environment)")
-
+        
     def _get_site_names(self) -> List[str]:
         """
         Helper function to get the names of the sites used for robot initial poses.
@@ -198,17 +207,10 @@ class IOSDevice(Device):
         """
         super()._reset_internal_state()
 
-        # Reset pose
-        self._pose = np.array(
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
-        )  # translation and quaternion (x, y, z, qx, qy, qz, qw)
-
-        init_pos, init_rot = self._get_pose()
-        self.initial_pose = np.zeros(7, dtype=np.float32)
-        self.initial_pose[:3] = init_pos
-        self.initial_pose[3:] = transform_utils.mat2quat(init_rot)  # quaternion (qx, qy, qz, qw)
-        print(f"Initial pose: {self.initial_pose}")
-
+        # reset initial pose
+        self._initial_pose = copy.deepcopy(self._pose)
+        print(f"Initial pose: {self._initial_pose}")
+        
     def start_control(self):
         """
         Method that should be called externally before controller can
@@ -217,68 +219,23 @@ class IOSDevice(Device):
         self._reset_internal_state()
         self._reset_state = 0
         self._enabled = True
-
-    def _get_pose(self) -> Tuple[np.ndarray, np.ndarray]:
+        
+    def _get_state(self) -> Tuple[float, np.ndarray, np.ndarray]:
         """
-        Extracts the pose data from the given frames.
-
-        Args:
-            frames: The frames from the RealSense pipeline containing pose data.
+        Get the current state of the MagiClaw.
 
         Returns:
-            pos: Translation vector as a numpy array.
-            rot: Rotation as a scipy Rotation object.
+            Tuple[float, np.ndarray, np.ndarray]: The claw angle, position and rotation matrix of the MagiClaw.
         """
-
+        
         # Get the pose and extract translation and rotation
-        _, _, _, _, _, global_pose = self.subscriber.subscribeMessage()
-        pos = np.array(global_pose[:3], dtype=np.float32)
-        rot = transform_utils.quat2mat(np.array(global_pose[3:], dtype=np.float32))
-
-        # Convert to z-up coordinate
-        pos, rot = self._convert_to_z_up(pos, rot)
-
-        return pos, rot
-
-    def _convert_to_z_up(self, pos: np.ndarray, rot: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Converts the pose from the ARKit coordinate system to a z-up coordinate system.
-
-        The T265 uses a x-right, y-down, z-forward coordinate system,
-        while the z-up coordinate system uses x-right, y-forward, z-up.
-        ARKit:                   z-up:
-            y                       z
-            |                       |
-            |                       |
-            |                       |
-             ------- x              ------- y
-           /                       /
-          /                       /
-         /                       /
-        z                       x
-
-        This function rotates the translation and rotation accordingly.
-        Specifically, it rotates the pose by -90 degrees around the x-axis.
-
-        Args:
-            pos (np.ndarray): Translation vector in T265 coordinate system.
-            rot (R): Rotation in T265 coordinate system.
-        Returns:
-            ur_pos (np.ndarray): Translation vector in z-up coordinate system.
-            ur_rot (R): Rotation in z-up coordinate system.
-        """
-
-        # Rotation matrix to convert T265 to z-up coordinate system
-        rot_mat = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
-
-        # Convert T265 translation to z-up translation
-        convert_pos = rot_mat @ pos
-
-        # Convert T265 rotation to z-up rotation
-        convert_rot = rot_mat @ rot
-
-        return convert_pos, convert_rot
-
+        claw_angle, _, _, magiclaw_pose = self.subscriber.subscribeMessage()
+        pos = magiclaw_pose[:3]
+        rot = magiclaw_pose[3:]
+        claw_angle = claw_angle / 180.0 * np.pi  # convert to radians
+        
+        return claw_angle, pos, rot
+    
     def get_controller_state(self):
         """
         Grabs the current state of the controller.
@@ -288,7 +245,7 @@ class IOSDevice(Device):
         """
 
         return dict()
-
+    
     def run(self):
         """
         Main loop for the RealSense T265 camera.
@@ -296,14 +253,13 @@ class IOSDevice(Device):
         """
         while True:
             if self._enabled:
-                # get the pose data
-                pos, rot = self._get_pose()
-
-                pos = pos - self.initial_pose[:3]
-
+                # get the current state
+                claw_angle, pos, rot = self._get_state()
+                
                 self._pose[:3] = pos
-                self._pose[3:] = transform_utils.mat2quat(rot)
-
+                self._pose[3:] = rot
+                self._claw_angle = claw_angle
+    
     def input2action(self) -> Optional[Dict]:
         """
         Converts the current pose into a control action for the robot.
@@ -311,17 +267,17 @@ class IOSDevice(Device):
         Returns:
             dict: A dictionary containing the control values for the robot.
         """
-
+        
         if self._reset_state:
             return None
-
+        
         action: Dict[str, np.ndarray] = {}
         gripper_dof = self.env.robots[0].gripper[self.active_end_effector].dof
         site_names = self._get_site_names()
         for site_name in site_names:
             target_name_prefix = "right" if "right" in site_name else "left"  # hardcoded for now
             robot_init_pose = self.robot_ee_init_poses[site_name]
-            target_pos_world = robot_init_pose["pos"] + self._pose[:3] * self.pos_sensitivity
+            target_pos_world = robot_init_pose["pos"] + (self._pose[:3] - self._initial_pose[:3]) * self.pos_sensitivity
             target_ori_mat_world = transform_utils.quat2mat(self._pose[3:])
 
             if isinstance(self.env.robots[0].composite_controller, WholeBodyIK):
@@ -372,35 +328,34 @@ class IOSDevice(Device):
             # convert ori mat to axis angle
             axis_angle_target = transform_utils.quat2axisangle(transform_utils.mat2quat(target_ori_mat))
             action[target_name_prefix + "_abs"] = np.concatenate([target_pos, axis_angle_target])
-            grasp = 1 if self.grasp else -1  # hardcode grasp action for now
+            grasp = np.clip(self._claw_angle / 1.1 * 2.0 - 1.0, -1.0, 1.0)
             action[f"{target_name_prefix}_gripper"] = np.array([grasp] * gripper_dof)
 
         return action
-
+    
+    
     def on_press(self, key):
         """
-        Key handler for key presses.
-        Args:
-            key: key that was pressed
-        """
-        pass
+        Handle key press events.
 
+        Args:
+            key: The key that was pressed.
+        """
+        
+        pass
+    
     def on_release(self, key):
         """
-        Key handler for key releases.
+        Handle key release events.
+
         Args:
-            key: key that was pressed
+            key: The key that was released.
         """
+        
         try:
             print(f"Key released: {key}")
-            # controls for grasping
-            if key == Key.space:
-                self.grasp_states[self.active_robot][self.active_arm_index] = not self.grasp_states[self.active_robot][
-                    self.active_arm_index
-                ]  # toggle gripper
-
             # controls for mobile base (only applicable if mobile base present)
-            elif key.char == "b":
+            if key.char == "b":
                 self.base_modes[self.active_robot] = not self.base_modes[self.active_robot]  # toggle mobile base
             elif key.char == "s":
                 self.active_arm_index = (self.active_arm_index + 1) % len(self.all_robot_arms[self.active_robot])

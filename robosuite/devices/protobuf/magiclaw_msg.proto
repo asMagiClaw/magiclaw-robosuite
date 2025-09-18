@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package MagiClaw;
+
+message Motor
+{
+    float angle = 1;
+    float speed = 2;
+    float iq = 3;
+    int32 temperature = 4;
+}
+
+message Claw
+{
+    float angle = 1;
+    Motor motor = 2;
+}
+
+message Finger
+{
+    bytes img = 1;
+    repeated float pose = 2;
+    repeated float force = 3;
+    repeated float node = 4;
+}
+
+message Phone
+{
+    bytes color_img = 1;
+    bytes depth_img = 2;
+    int32 depth_width = 3;
+    int32 depth_height = 4;
+    repeated float local_pose = 5;
+    repeated float global_pose = 6;
+}
+
+message MagiClaw
+{
+    float timestamp = 1;
+    Claw claw = 2;
+    Finger finger_0 = 3;
+    Finger finger_1 = 4;
+    Phone phone = 5;
+    repeated float pose = 6;
+}

@@ -126,3 +126,10 @@ MUJOCO_LOG.TXT
 
 # private demonstration files
 robosuite/models/assets/demonstrations_private
+
+# protobuf files
+*_pb2.py
+
+mujoco_usdpkg/
+
+*.tmp.usd

@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--controller",
         type=str,
-        default="BASIC",
+        default="WHOLE_BODY_IK",
         help="Choice of controller. Can be 'ik' or 'osc'",
     )
     parser.add_argument("--device", type=str, default="keyboard")

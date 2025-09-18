@@ -92,20 +92,39 @@ import argparse
 import time
 
 import numpy as np
-
+import mujoco
 import robosuite as suite
+from copy import deepcopy
 from robosuite import load_composite_controller_config
+from robosuite.robots import register_robot_class
+from robosuite.models.robots import Panda
 from robosuite.controllers.composite.composite_controller import WholeBody
+from mujoco.usd import exporter
 from robosuite.wrappers import VisualizationWrapper
+
+@register_robot_class("FixedBaseRobot")
+class PandaWithMagiClaw(Panda):
+    """
+    Panda robot with MagiClaw gripper.
+    """
+
+    @property
+    def default_gripper(self):
+        return {"right": "MagiClaw"}
+    
+    @property
+    def init_qpos(self):
+        return np.array([0.00, 0.00, 0.00, -np.pi / 2.0, 0.00, np.pi / 2.0, np.pi / 4])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--environment", type=str, default="Lift")
+    parser.add_argument("--environment", type=str, default="Door", choices=suite.ALL_ENVIRONMENTS,
+                        help="Environment to run. Choose from: {}".format(suite.ALL_ENVIRONMENTS))
     parser.add_argument(
         "--robots",
         nargs="+",
         type=str,
-        default="Panda",
+        default="PandaWithMagiClaw",
         help="Which robot(s) to use in the env",
     )
     parser.add_argument(
@@ -139,7 +158,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--device",
         type=str,
-        default="t265",
+        default="magiclaw",
         choices=["keyboard", "mjgui", "t265", "ios", "magiclaw"],
     )
     parser.add_argument(
@@ -169,6 +188,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--host",
         type=str,
+        default="192.168.31.179",
         help="(MagiClaw Only)Host address of the IOS device or MagiClaw.",
     )
     args = parser.parse_args()
@@ -236,17 +256,17 @@ if __name__ == "__main__":
             pos_sensitivity=args.pos_sensitivity,
             rot_sensitivity=args.rot_sensitivity,
         )
-    # elif args.device == "magiclaw":
-    #     from robosuite.devices import MagiClaw
+    elif args.device == "magiclaw":
+        from robosuite.devices import MagiClaw
 
-    #     if args.host is None:
-    #         raise ValueError("Host address must be specified for MagiClaw device.")
-    #     device = MagiClaw(
-    #         env=env,
-    #         host=args.host,
-    #         pos_sensitivity=args.pos_sensitivity,
-    #         rot_sensitivity=args.rot_sensitivity,
-    #     )
+        if args.host is None:
+            raise ValueError("Host address must be specified for MagiClaw device.")
+        device = MagiClaw(
+            env=env,
+            host=args.host,
+            pos_sensitivity=args.pos_sensitivity,
+            rot_sensitivity=args.rot_sensitivity,
+        )
     elif args.device == "t265":
         from robosuite.devices.realsense_t265 import RealSenseT265
 
@@ -260,75 +280,92 @@ if __name__ == "__main__":
         raise Exception(
             "Invalid device choice: choose either 'keyboard', 'mjgui', 't265' or 'magiclaw'."
         )
+    
+    model = env.sim.model._model
+    data = env.sim.data._data
+    exp = exporter.USDExporter(
+        model=model, 
+        output_directory=f"mujoco_usdpkg/{args.environment}/{time.strftime('%Y-%m-%d_%H-%M-%S')}",
+        camera_names=["frontview"],
+        )
+    
+    scene_option = mujoco.MjvOption()
+    scene_option.geomgroup = [0, 1, 0, 0, 0, 0]
 
-    while True:
-        # Reset the environment
-        obs = env.reset()
-
-        # Setup rendering
-        cam_id = 0
-        num_cam = len(env.sim.model.camera_names)
-        env.render()
-
-        # Initialize variables that should the maintained between resets
-        last_grasp = 0
-
-        # Initialize device control
-        device.start_control()
-        all_prev_gripper_actions = [
-            {
-                f"{robot_arm}_gripper": np.repeat([0], robot.gripper[robot_arm].dof)
-                for robot_arm in robot.arms
-                if robot.gripper[robot_arm].dof > 0
-            }
-            for robot in env.robots
-        ]
-
-        # Loop until we get a reset from the input or the task completes
+    try:
         while True:
-            start = time.time()
+            # Reset the environment
+            obs = env.reset()
 
-            # Set active robot
-            active_robot = env.robots[device.active_robot]
-
-            # Get the newest action
-            input_ac_dict = device.input2action()
-
-            # If action is none, then this a reset so we should break
-            if input_ac_dict is None:
-                break
-
-            from copy import deepcopy
-
-            action_dict = deepcopy(input_ac_dict)  # {}
-            # set arm actions
-            for arm in active_robot.arms:
-                if isinstance(active_robot.composite_controller, WholeBody):  # input type passed to joint_action_policy
-                    controller_input_type = active_robot.composite_controller.joint_action_policy.input_type
-                else:
-                    controller_input_type = active_robot.part_controllers[arm].input_type
-
-                if controller_input_type == "delta":
-                    action_dict[arm] = input_ac_dict[f"{arm}_delta"]
-                elif controller_input_type == "absolute":
-                    action_dict[arm] = input_ac_dict[f"{arm}_abs"]
-                else:
-                    raise ValueError
-                print(f"{arm} {controller_input_type} action: {action_dict[arm]}")
-
-            # Maintain gripper state for each robot but only update the active robot with action
-            env_action = [robot.create_action_vector(all_prev_gripper_actions[i]) for i, robot in enumerate(env.robots)]
-            env_action[device.active_robot] = active_robot.create_action_vector(action_dict)
-            env_action = np.concatenate(env_action)
-            for gripper_ac in all_prev_gripper_actions[device.active_robot]:
-                all_prev_gripper_actions[device.active_robot][gripper_ac] = action_dict[gripper_ac]
-
-            env.step(env_action)
+            # Setup rendering
+            cam_id = 0
+            num_cam = len(env.sim.model.camera_names)
             env.render()
 
-            # limit frame rate if necessary
-            if args.max_fr is not None:
-                elapsed = time.time() - start
-                diff = 1 / args.max_fr - elapsed
-                if diff > 0:
-                    time.sleep(diff)
+            # Initialize variables that should the maintained between resets
+            last_grasp = 0
+
+            # Initialize device control
+            device.start_control()
+            all_prev_gripper_actions = [
+                {
+                    f"{robot_arm}_gripper": np.repeat([0], robot.gripper[robot_arm].dof)
+                    for robot_arm in robot.arms
+                    if robot.gripper[robot_arm].dof > 0
+                }
+                for robot in env.robots
+            ]
+
+            # Loop until we get a reset from the input or the task completes
+            while True:
+                start = time.time()
+
+                # Set active robot
+                active_robot = env.robots[device.active_robot]
+
+                # Get the newest action
+                input_ac_dict = device.input2action()
+
+                # If action is none, then this a reset so we should break
+                if input_ac_dict is None:
+                    break
+
+                action_dict = deepcopy(input_ac_dict)  # {}
+                # set arm actions
+                for arm in active_robot.arms:
+                    if isinstance(active_robot.composite_controller, WholeBody):  # input type passed to joint_action_policy
+                        controller_input_type = active_robot.composite_controller.joint_action_policy.input_type
+                    else:
+                        controller_input_type = active_robot.part_controllers[arm].input_type
+
+                    if controller_input_type == "delta":
+                        action_dict[arm] = input_ac_dict[f"{arm}_delta"]
+                    elif controller_input_type == "absolute":
+                        action_dict[arm] = input_ac_dict[f"{arm}_abs"]
+                    else:
+                        raise ValueError
+                    print(f"{arm} {controller_input_type} action: {action_dict[arm]}")
+
+                # Maintain gripper state for each robot but only update the active robot with action
+                env_action = [robot.create_action_vector(all_prev_gripper_actions[i]) for i, robot in enumerate(env.robots)]
+                env_action[device.active_robot] = active_robot.create_action_vector(action_dict)
+                env_action = np.concatenate(env_action)
+                for gripper_ac in all_prev_gripper_actions[device.active_robot]:
+                    all_prev_gripper_actions[device.active_robot][gripper_ac] = action_dict[gripper_ac]
+
+                env.step(env_action)
+                env.render()
+                exp.update_scene(data, scene_option=scene_option)
+
+                # limit frame rate if necessary
+                if args.max_fr is not None:
+                    elapsed = time.time() - start
+                    diff = 1 / args.max_fr - elapsed
+                    if diff > 0:
+                        time.sleep(diff)
+    except KeyboardInterrupt:
+        print("Keyboard interrupt received, exiting...")
+                    
+    exp.add_light(pos=[0, 0, 0], intensity=2000, obj_name="dome_light", light_type="dome")
+
+    exp.save_scene(filetype="usd")
