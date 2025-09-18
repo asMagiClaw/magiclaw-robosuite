@@ -133,3 +133,5 @@ robosuite/models/assets/demonstrations_private
 mujoco_usdpkg/
 
 *.tmp.usd
+
+.vscode
