@@ -10,10 +10,6 @@ Keyboard:
 
     Note:
         To run this script with macOS, you must run it with root access.
-
-iPhone / iPad (IOS):
-    We use the iPhone / iPad to control the end-effector of the robot.
-    The iPhone / iPad provides 6-DoF control commands through the ARKit.
     
 MagiClaw:
     We use the MagiClaw to control the end-effector of the robot.
@@ -147,7 +143,7 @@ if __name__ == "__main__":
         "--device",
         type=str,
         default="magiclaw",
-        choices=["keyboard", "mjgui", "t265", "ios", "magiclaw"],
+        choices=["keyboard", "magiclaw"],
     )
     parser.add_argument(
         "--pos-sensitivity",
@@ -170,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--host",
         type=str,
-        help="Host address of the IOS device or MagiClaw.",
+        help="Host address of the MagiClaw.",
     )
     args = parser.parse_args()
 
@@ -222,17 +218,6 @@ if __name__ == "__main__":
             rot_sensitivity=args.rot_sensitivity,
         )
         env.viewer.add_keypress_callback(device.on_press)
-    elif args.device == "ios":
-        from robosuite.devices import IOSDevice
-
-        if args.host is None:
-            raise ValueError("Host address must be specified for IOS device.")
-        device = IOSDevice(
-            env=env,
-            host=args.host,
-            pos_sensitivity=args.pos_sensitivity,
-            rot_sensitivity=args.rot_sensitivity,
-        )
     elif args.device == "magiclaw":
         from robosuite.devices import MagiClaw
 
@@ -246,7 +231,7 @@ if __name__ == "__main__":
         )
     else:
         raise Exception(
-            "Invalid device choice: choose either 'keyboard', 't265' or 'magiclaw'."
+            "Invalid device choice: choose either 'keyboard', or 'magiclaw'."
         )
 
     try:

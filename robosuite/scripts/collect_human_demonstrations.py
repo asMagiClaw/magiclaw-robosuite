@@ -9,16 +9,30 @@ import datetime
 import json
 import os
 import time
-from glob import glob
-
 import h5py
 import numpy as np
-
+from glob import glob
+from copy import deepcopy
 import robosuite as suite
 from robosuite.controllers import load_composite_controller_config
+from robosuite.robots import register_robot_class
+from robosuite.models.robots import Panda
 from robosuite.controllers.composite.composite_controller import WholeBody
 from robosuite.wrappers import DataCollectionWrapper, VisualizationWrapper
 
+@register_robot_class("FixedBaseRobot")
+class PandaWithMagiClaw(Panda):
+    """
+    Panda robot with MagiClaw gripper.
+    """
+
+    @property
+    def default_gripper(self):
+        return {"right": "MagiClaw"}
+    
+    @property
+    def init_qpos(self):
+        return np.array([0.00, 0.00, 0.00, -np.pi / 2.0, 0.00, np.pi / 2.0, np.pi / 4])
 
 def collect_human_trajectory(env, device, arm, max_fr):
     """
@@ -65,8 +79,6 @@ def collect_human_trajectory(env, device, arm, max_fr):
         # If action is none, then this a reset so we should break
         if input_ac_dict is None:
             break
-
-        from copy import deepcopy
 
         action_dict = deepcopy(input_ac_dict)  # {}
         # set arm actions
@@ -215,12 +227,18 @@ if __name__ == "__main__":
         type=str,
         default=os.path.join(suite.models.assets_root, "demonstrations_private"),
     )
-    parser.add_argument("--environment", type=str, default="Lift")
+    parser.add_argument(
+        "--environment", 
+        type=str, 
+        default="Door", 
+        choices=suite.ALL_ENVIRONMENTS,
+        help="Environment to run. Choose from: {}".format(suite.ALL_ENVIRONMENTS),
+    )
     parser.add_argument(
         "--robots",
         nargs="+",
         type=str,
-        default="Panda",
+        default="PandaWithMagiClaw",
         help="Which robot(s) to use in the env",
     )
     parser.add_argument(
@@ -248,7 +266,12 @@ if __name__ == "__main__":
         default=None,
         help="Choice of controller. Can be generic (eg. 'BASIC' or 'WHOLE_BODY_MINK_IK') or json file (see robosuite/controllers/config for examples)",
     )
-    parser.add_argument("--device", type=str, default="keyboard")
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="magiclaw",
+        choices=["keyboard", "magiclaw"],
+    )
     parser.add_argument(
         "--pos-sensitivity",
         type=float,
@@ -278,6 +301,11 @@ if __name__ == "__main__":
         type=bool,
         default=False,
         help="(DualSense Only)Reverse the effect of the x and y axes of the joystick.It is used to handle the case that the left/right and front/back sides of the view are opposite to the LX and LY of the joystick(Push LX up but the robot move left in your view)",
+    )
+    parser.add_argument(
+        "--host",
+        type=str,
+        help="Host address of the MagiClaw.",
     )
     args = parser.parse_args()
 
@@ -334,30 +362,21 @@ if __name__ == "__main__":
             pos_sensitivity=args.pos_sensitivity,
             rot_sensitivity=args.rot_sensitivity,
         )
-    elif args.device == "spacemouse":
-        from robosuite.devices import SpaceMouse
+    elif args.device == "magiclaw":
+        from robosuite.devices import MagiClaw
 
-        device = SpaceMouse(
+        if args.host is None:
+            raise ValueError("Host address must be specified for MagiClaw device.")
+        device = MagiClaw(
             env=env,
+            host=args.host,
             pos_sensitivity=args.pos_sensitivity,
             rot_sensitivity=args.rot_sensitivity,
         )
-    elif args.device == "dualsense":
-        from robosuite.devices import DualSense
-
-        device = DualSense(
-            env=env,
-            pos_sensitivity=args.pos_sensitivity,
-            rot_sensitivity=args.rot_sensitivity,
-            reverse_xy=args.reverse_xy,
-        )
-    elif args.device == "mjgui":
-        assert args.renderer == "mjviewer", "Mocap is only supported with the mjviewer renderer"
-        from robosuite.devices.mjgui import MJGUI
-
-        device = MJGUI(env=env)
     else:
-        raise Exception("Invalid device choice: choose either 'keyboard' or 'spacemouse'.")
+        raise Exception(
+            "Invalid device choice: choose either 'keyboard', or 'magiclaw'."
+        )
 
     # make a new timestamped directory
     t1, t2 = str(time.time()).split(".")
