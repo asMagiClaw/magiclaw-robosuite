@@ -45,25 +45,7 @@ class MagiClawSubscriber:
         self.poller.register(self.subscriber, zmq.POLLIN)
         self.timeout = timeout
 
-        print("Package Claw")
-        print("Message Motor")
-        print("{\n\tfloat angle = 1;\n\tfloat speed = 2;\n\tfloat iq = 3;\n\tint32 temperature = 4;\n}")
-        print("Message Claw")
-        print("{\n\tfloat angle = 1;\n\tMotor motor = 2;\n}")
-        print("Message Finger")
-        print(
-            "{\n\tbytes img = 1;\n\trepeated float pose = 2;\n\trepeated float force = 3;\n\trepeated float node = 4;\n}"
-        )
-        print("Message Phone")
-        print(
-            "{\n\tbytes color_img = 1;\n\trepeated int32 depth_img = 2\n\trepeated int32 depth_width = 3\n\trepeated int32 depth_height = 4\n}"
-        )
-        print("Message MagiClaw")
-        print(
-            "{\n\tfloat timestamp = 1;\n\tClaw claw = 2;\n\tFinger finger_0 = 3;\n\tFinger finger_1 = 4;\n\tPhone phone = 5;\n}"
-        )
-
-        print("Claw Subscriber Initialization Done.")
+        print("MagiClaw Subscriber Initialization Done.")
         print("{:-^80}".format(""))
 
     def subscribeMessage(self):
@@ -180,7 +162,7 @@ class MagiClaw(Device):
         print_command("Twist MagiClaw about an axis", "rotate arm about a corresponding axis")
         print_command("Move MagiClaw trigger", "open/close gripper")
         print_command("Ctrl+C", "quit")
-        print_command("", "reset simulation")
+        print_command("Ctrl+q", "reset simulation")
         print_command("b", "toggle arm/base mode (if applicable)")
         print_command("s", "switch active arm (if multi-armed robot)")
         print_command("=", "switch active robot (if multi-robot environment)")

@@ -1,4 +1,4 @@
-"""Teleoperate robot with keyboard or SpaceMouse.
+"""Teleoperate robot with MagiClaw.
 
 ***Choose user input option with the --device argument***
 
@@ -11,27 +11,13 @@ Keyboard:
     Note:
         To run this script with macOS, you must run it with root access.
 
-SpaceMouse:
-
-    We use the SpaceMouse 3D mouse to control the end-effector of the robot.
-    The mouse provides 6-DoF control commands. The commands are mapped to joint
-    velocities through an inverse kinematics solver from Bullet physics.
-
-    The two side buttons of SpaceMouse are used for controlling the grippers.
-
-    SpaceMouse Wireless from 3Dconnexion: https://www.3dconnexion.com/spacemouse_wireless/en/
-    We used the SpaceMouse Wireless in our experiments. The paper below used the same device
-    to collect human demonstrations for imitation learning.
-
-    Reinforcement and Imitation Learning for Diverse Visuomotor Skills
-    Yuke Zhu, Ziyu Wang, Josh Merel, Andrei Rusu, Tom Erez, Serkan Cabi, Saran Tunyasuvunakool,
-    János Kramár, Raia Hadsell, Nando de Freitas, Nicolas Heess
-    RSS 2018
-
-    Note:
-        This current implementation only supports macOS (Linux support can be added).
-        Download and install the driver before running the script:
-            https://www.3dconnexion.com/service/drivers.html
+iPhone / iPad (IOS):
+    We use the iPhone / iPad to control the end-effector of the robot.
+    The iPhone / iPad provides 6-DoF control commands through the ARKit.
+    
+MagiClaw:
+    We use the MagiClaw to control the end-effector of the robot.
+    The MagiClaw provides 6-DoF control commands through iPhone mounted on it.
 
 Additionally, --pos_sensitivity and --rot_sensitivity provide relative gains for increasing / decreasing the user input
 device sensitivity
@@ -90,16 +76,13 @@ Examples:
 
 import argparse
 import time
-
 import numpy as np
-import mujoco
 import robosuite as suite
 from copy import deepcopy
 from robosuite import load_composite_controller_config
 from robosuite.robots import register_robot_class
 from robosuite.models.robots import Panda
 from robosuite.controllers.composite.composite_controller import WholeBody
-from mujoco.usd import exporter
 from robosuite.wrappers import VisualizationWrapper
 
 @register_robot_class("FixedBaseRobot")
@@ -118,8 +101,13 @@ class PandaWithMagiClaw(Panda):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--environment", type=str, default="Door", choices=suite.ALL_ENVIRONMENTS,
-                        help="Environment to run. Choose from: {}".format(suite.ALL_ENVIRONMENTS))
+    parser.add_argument(
+        "--environment", 
+        type=str, 
+        default="Door", 
+        choices=suite.ALL_ENVIRONMENTS,
+        help="Environment to run. Choose from: {}".format(suite.ALL_ENVIRONMENTS),
+    )
     parser.add_argument(
         "--robots",
         nargs="+",
@@ -180,16 +168,9 @@ if __name__ == "__main__":
         help="Sleep when simluation runs faster than specified frame rate; 20 fps is real time.",
     )
     parser.add_argument(
-        "--reverse_xy",
-        type=bool,
-        default=False,
-        help="(DualSense Only)Reverse the effect of the x and y axes of the joystick.It is used to handle the case that the left/right and front/back sides of the view are opposite to the LX and LY of the joystick(Push LX up but the robot move left in your view)",
-    )
-    parser.add_argument(
         "--host",
         type=str,
-        default="192.168.31.179",
-        help="(MagiClaw Only)Host address of the IOS device or MagiClaw.",
+        help="Host address of the IOS device or MagiClaw.",
     )
     args = parser.parse_args()
 
@@ -241,10 +222,6 @@ if __name__ == "__main__":
             rot_sensitivity=args.rot_sensitivity,
         )
         env.viewer.add_keypress_callback(device.on_press)
-    elif args.device == "mjgui":
-        from robosuite.devices.mjgui import MJGUI
-
-        device = MJGUI(env=env)
     elif args.device == "ios":
         from robosuite.devices import IOSDevice
 
@@ -267,30 +244,10 @@ if __name__ == "__main__":
             pos_sensitivity=args.pos_sensitivity,
             rot_sensitivity=args.rot_sensitivity,
         )
-    elif args.device == "t265":
-        from robosuite.devices.realsense_t265 import RealSenseT265
-
-        device = RealSenseT265(
-            env=env,
-            pos_sensitivity=args.pos_sensitivity,
-            rot_sensitivity=args.rot_sensitivity,
-        )
-    
     else:
         raise Exception(
-            "Invalid device choice: choose either 'keyboard', 'mjgui', 't265' or 'magiclaw'."
+            "Invalid device choice: choose either 'keyboard', 't265' or 'magiclaw'."
         )
-    
-    model = env.sim.model._model
-    data = env.sim.data._data
-    exp = exporter.USDExporter(
-        model=model, 
-        output_directory=f"mujoco_usdpkg/{args.environment}/{time.strftime('%Y-%m-%d_%H-%M-%S')}",
-        camera_names=["frontview"],
-        )
-    
-    scene_option = mujoco.MjvOption()
-    scene_option.geomgroup = [0, 1, 0, 0, 0, 0]
 
     try:
         while True:
@@ -355,7 +312,6 @@ if __name__ == "__main__":
 
                 env.step(env_action)
                 env.render()
-                exp.update_scene(data, scene_option=scene_option)
 
                 # limit frame rate if necessary
                 if args.max_fr is not None:
@@ -365,7 +321,3 @@ if __name__ == "__main__":
                         time.sleep(diff)
     except KeyboardInterrupt:
         print("Keyboard interrupt received, exiting...")
-                    
-    exp.add_light(pos=[0, 0, 0], intensity=2000, obj_name="dome_light", light_type="dome")
-
-    exp.save_scene(filetype="usd")
